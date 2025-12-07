@@ -1,0 +1,908 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>DADO WARS: Online Edition</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    
+    <!-- FIREBASE SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
+        import { getFirestore, doc, getDoc, setDoc, updateDoc, onSnapshot, arrayUnion, increment } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyBLb3l8-TsSWPTlOtFgWdnk-CEjMbysvc8",
+            authDomain: "territorio-dado.firebaseapp.com",
+            projectId: "territorio-dado",
+            storageBucket: "territorio-dado.firebasestorage.app",
+            messagingSenderId: "288563906866",
+            appId: "1:288563906866:web:916a1374766e1b44952f2b",
+            measurementId: "G-EJDCRWH64F"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        
+        // Espongo le funzioni globalmente per usarle nel codice vanilla JS
+        window.fb = { auth, db, doc, getDoc, setDoc, updateDoc, onSnapshot, arrayUnion, signInAnonymously, onAuthStateChanged };
+        window.appId = "dado-wars-prod-v1"; // ID Univoco per separare i dati
+    </script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@300;400;600&display=swap');
+        
+        body { font-family: 'Fredoka', sans-serif; background-color: #111827; color: white; overflow: hidden; user-select: none; -webkit-tap-highlight-color: transparent; }
+        .glass-panel { background: rgba(31, 41, 55, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.08); box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37); }
+        .grid-container { display: grid; grid-template-columns: repeat(var(--grid-cols), 1fr); gap: 1px; width: 100%; max-width: 600px; margin: 0 auto; padding: 4px; border-radius: 8px; }
+        .cell { aspect-ratio: 1; background-color: #374151; border-radius: 2px; position: relative; display: flex; align-items: center; justify-content: center; font-size: 10px; cursor: pointer; overflow: hidden; background-size: cover; background-position: center; transition: all 0.2s; }
+        .cell.void { background-color: transparent; border: none; pointer-events: none; }
+        .cell.highlight-valid { box-shadow: inset 0 0 0 2px white; animation: pulse-green 1.5s infinite; z-index: 10; }
+        .cell.highlight-attack { box-shadow: inset 0 0 0 2px #ef4444; animation: pulse-red 1.5s infinite; z-index: 10; }
+        .cell.highlight-bomb { box-shadow: inset 0 0 0 2px #FCD34D; animation: pulse-yellow 1.5s infinite; z-index: 10; }
+        .cell.highlight-source { box-shadow: inset 0 0 0 3px #3B82F6; animation: pulse-blue 1.5s infinite; z-index: 10; }
+        .cell.is-head { border: 2px solid #FFF; z-index: 20; box-shadow: 0 0 10px rgba(255,255,255,0.8); }
+        .cell.owned { box-shadow: inset 0 0 4px rgba(0,0,0,0.5); }
+        
+        @keyframes pulse-green { 0% { transform: scale(1); filter: brightness(1); } 50% { transform: scale(1.05); filter: brightness(1.2); } 100% { transform: scale(1); filter: brightness(1); } }
+        @keyframes pulse-red { 0% { transform: scale(1); filter: brightness(1); } 50% { transform: scale(0.95); filter: brightness(0.8); } 100% { transform: scale(1); filter: brightness(1); } }
+        @keyframes pulse-blue { 0% { transform: scale(1); filter: brightness(1); } 50% { transform: scale(1.05); filter: brightness(1.2); } 100% { transform: scale(1); filter: brightness(1); } }
+        @keyframes pulse-yellow { 0% { transform: scale(1); filter: brightness(1); } 50% { transform: scale(1.05); filter: brightness(1.2); } 100% { transform: scale(1); filter: brightness(1); } }
+
+        /* 3D Dice */
+        .dice-scene { width: 60px; height: 60px; perspective: 600px; margin: 0 auto; }
+        .cube { width: 100%; height: 100%; position: relative; transform-style: preserve-3d; transform: translateZ(-30px); transition: transform 1s cubic-bezier(0.1, 0.9, 0.2, 1); }
+        .cube.rolling { animation: spin 0.6s linear infinite; }
+        @keyframes spin { 0% { transform: translateZ(-30px) rotateX(0deg) rotateY(0deg) rotateZ(0deg); } 100% { transform: translateZ(-30px) rotateX(360deg) rotateY(720deg) rotateZ(360deg); } }
+        .cube__face { position: absolute; width: 60px; height: 60px; background: linear-gradient(145deg, #ffffff, #e6e6e6); border: 2px solid #d4d4d4; border-radius: 8px; display: flex; justify-content: center; align-items: center; }
+        .dot { width: 10px; height: 10px; background: #1f2937; border-radius: 50%; position: absolute; }
+        .cube__face--1 { transform: rotateY(0deg) translateZ(30px); } .cube__face--2 { transform: rotateY(180deg) translateZ(30px); } 
+        .cube__face--3 { transform: rotateY(-90deg) translateZ(30px); } .cube__face--4 { transform: rotateY(90deg) translateZ(30px); } 
+        .cube__face--5 { transform: rotateX(90deg) translateZ(30px); } .cube__face--6 { transform: rotateX(-90deg) translateZ(30px); }
+        .cube__face--1 .dot:nth-child(1) { top: 25px; left: 25px; background: #ef4444; } 
+        .cube__face--6 .dot:nth-child(1) { top: 10px; left: 10px; } .cube__face--6 .dot:nth-child(6) { bottom: 10px; right: 10px; }
+
+        .fade-in { animation: fadeIn 0.4s ease-in; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+        .player-chip.active-turn { transform: scale(1.1); border-color: #60A5FA; box-shadow: 0 0 10px rgba(96, 165, 250, 0.5); }
+        
+        .mode-btn { @apply px-2 py-2 rounded-lg font-bold text-[9px] uppercase tracking-wider border transition-all; }
+        .mode-btn.active { @apply bg-blue-600 border-blue-400 text-white shadow-[0_0_15px_rgba(37,99,235,0.5)]; }
+        .mode-btn.inactive { @apply bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700; }
+
+        .match-card { background: rgba(30, 41, 59, 0.95); border: 1px solid rgba(255,255,255,0.15); border-radius: 12px; padding: 10px; width: 160px; flex-shrink: 0; display: flex; flex-direction: column; gap: 4px; position: relative; transition: all 0.3s ease; }
+        .match-card.user-match { border-color: #FBBF24; box-shadow: 0 0 10px rgba(251, 191, 36, 0.2); }
+        .t-row { display: flex; align-items: center; justify-content: space-between; font-size: 10px; padding: 4px; border-radius: 4px; background: rgba(0,0,0,0.2); }
+        .t-row.winner { background: rgba(16, 185, 129, 0.2); border: 1px solid #059669; }
+        .t-row.loser { opacity: 0.4; text-decoration: line-through; }
+    </style>
+</head>
+<body class="h-screen w-screen flex flex-col bg-gray-900 text-white overflow-hidden">
+
+    <!-- LOADING OVERLAY -->
+    <div id="loading-screen" class="absolute inset-0 bg-black z-[100] flex items-center justify-center">
+        <div class="text-center">
+            <i class="fas fa-dice-d20 fa-spin text-5xl text-blue-500 mb-4"></i>
+            <p class="text-gray-400 font-bold animate-pulse">CONNESSIONE AL SERVER...</p>
+        </div>
+    </div>
+
+    <!-- 0. LOGIN (NICKNAME & ENTRY) -->
+    <div id="screen-login" class="hidden flex-grow flex flex-col items-center justify-center p-4 fade-in h-full">
+        <div class="text-center mb-8">
+            <h1 class="text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-500">DADO WARS</h1>
+            <p class="text-xs uppercase font-bold tracking-[0.4em] text-gray-400 mt-2">Online Multiplayer</p>
+        </div>
+        <div class="glass-panel p-8 rounded-2xl w-full max-w-sm space-y-4">
+            <div>
+                <label class="text-xs text-gray-400 font-bold ml-1">NICKNAME</label>
+                <input type="text" id="inp-nickname" class="w-full bg-gray-900 border border-gray-700 rounded-xl p-3 text-center font-bold text-white focus:border-blue-500 outline-none uppercase" placeholder="IL TUO NOME" maxlength="10">
+            </div>
+            <button onclick="createLobby()" class="w-full bg-blue-600 hover:bg-blue-500 py-3 rounded-xl font-bold shadow-lg transform active:scale-95 transition">
+                <i class="fas fa-plus mr-2"></i> CREA NUOVA PARTITA
+            </button>
+            <div class="relative flex py-2 items-center">
+                <div class="flex-grow border-t border-gray-700"></div>
+                <span class="flex-shrink mx-4 text-gray-500 text-xs font-bold">OPPURE</span>
+                <div class="flex-grow border-t border-gray-700"></div>
+            </div>
+            <div class="flex gap-2">
+                <input type="text" id="inp-code" class="w-24 bg-gray-800 border border-gray-600 rounded-xl text-center font-mono font-bold uppercase text-xl" placeholder="CODE" maxlength="4">
+                <button onclick="joinLobby()" class="flex-grow bg-gray-700 hover:bg-gray-600 py-3 rounded-xl font-bold border border-gray-600">
+                    ENTRA
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- LOBBY ROOM -->
+    <div id="screen-lobby" class="hidden flex-grow flex flex-col p-4 fade-in h-full items-center justify-center">
+        <div class="glass-panel p-6 rounded-2xl w-full max-w-md text-center">
+            <div class="mb-4">
+                <p class="text-xs text-gray-400 uppercase font-bold">Codice Stanza</p>
+                <h2 id="lobby-code-display" class="text-blue-400 font-mono text-4xl font-bold tracking-widest bg-gray-900/50 rounded-lg py-2 mt-1 select-all">????</h2>
+            </div>
+            <div class="text-left mb-2 text-xs font-bold text-gray-500 uppercase flex justify-between">
+                <span>Giocatori nella Lobby</span>
+                <span id="lobby-count">0/16</span>
+            </div>
+            <div id="lobby-list" class="space-y-2 mb-6 max-h-48 overflow-y-auto bg-gray-900/30 p-2 rounded-xl"></div>
+            
+            <div id="host-controls" class="hidden space-y-2">
+                <button onclick="goToSetup()" class="w-full bg-green-600 hover:bg-green-500 py-3 rounded-xl font-bold shadow-lg animate-pulse">
+                    VAI ALLA CONFIGURAZIONE <i class="fas fa-arrow-right ml-2"></i>
+                </button>
+            </div>
+            <div id="client-msg" class="text-yellow-500 font-bold text-sm hidden animate-pulse">
+                In attesa dell'Host...
+            </div>
+        </div>
+    </div>
+
+    <!-- 1. SETUP SCREEN (Host Controls, Client View) -->
+    <div id="screen-setup" class="hidden flex-grow flex flex-col items-center justify-center p-4 fade-in h-full">
+        <div class="text-center shrink-0 mb-4">
+            <h1 class="text-3xl font-bold text-white">IMPOSTAZIONI</h1>
+            <p id="setup-subtitle" class="text-gray-400 text-[10px] uppercase font-bold tracking-widest">Configurazione Partita</p>
+        </div>
+
+        <div class="glass-panel p-6 rounded-2xl w-full max-w-sm space-y-4 relative">
+            <!-- BLOCKER FOR CLIENTS -->
+            <div id="setup-blocker" class="absolute inset-0 z-50 bg-gray-900/80 backdrop-blur-sm rounded-2xl flex flex-col items-center justify-center text-center p-6 hidden">
+                <i class="fas fa-tools text-3xl text-gray-500 mb-2"></i>
+                <h3 class="font-bold text-white">L'HOST STA CONFIGURANDO...</h3>
+                <p class="text-xs text-gray-400 mt-2">Attendi che le impostazioni siano confermate.</p>
+            </div>
+
+            <div class="flex border-b border-gray-700 mb-2">
+                <button onclick="if(isHost) updateDB('settings.setupType', 'QUICK')" id="tab-quick" class="flex-1 py-2 text-xs font-bold transition-colors">PARTITA VELOCE</button>
+                <button onclick="if(isHost) updateDB('settings.setupType', 'TOURNAMENT')" id="tab-tourney" class="flex-1 py-2 text-xs font-bold transition-colors">TORNEO</button>
+            </div>
+
+            <!-- QUICK SETTINGS -->
+            <div id="settings-quick" class="space-y-4">
+                <div class="bg-gray-900/50 p-2 rounded-xl flex space-x-1">
+                    <button onclick="if(isHost) updateDB('settings.mode', 'CLASSIC')" id="btn-mode-classic" class="mode-btn w-1/3">Classica</button>
+                    <button onclick="if(isHost) updateDB('settings.mode', 'TOTAL_WAR')" id="btn-mode-war" class="mode-btn w-1/3">Totale</button>
+                    <button onclick="if(isHost) updateDB('settings.mode', 'TACTICS')" id="btn-mode-tactics" class="mode-btn w-1/3">Tattica</button>
+                </div>
+                
+                <div class="bg-gray-800 p-2 rounded flex items-center justify-between">
+                    <label class="text-[9px] font-bold text-gray-400 uppercase">Mappa</label>
+                    <select id="map-select" class="bg-gray-900 text-white text-xs p-1 rounded font-bold outline-none w-32 text-right" onchange="if(isHost) updateDB('settings.mapType', this.value)">
+                        <option value="SQUARE">Quadrata</option>
+                        <option value="ARENA">Arena</option>
+                        <option value="DONUT">Ciambella</option>
+                        <option value="ISLANDS">Arcipelago</option>
+                        <option value="RANDOM">Casuale</option>
+                    </select>
+                </div>
+                
+                <div class="flex justify-between items-center bg-gray-800 p-2 rounded">
+                    <label class="text-xs font-bold text-gray-400 uppercase">CPU Extra</label>
+                    <div class="flex items-center space-x-3 bg-gray-900 rounded-lg px-2">
+                        <button onclick="if(isHost) updateCpuCount(-1)" class="px-2 font-bold">-</button>
+                        <span id="val-cpuCount" class="text-blue-400 font-bold">0</span>
+                        <button onclick="if(isHost) updateCpuCount(1)" class="px-2 font-bold">+</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TOURNAMENT SETTINGS -->
+            <div id="settings-tourney" class="space-y-4 hidden">
+                <div class="bg-gray-800 p-2 rounded">
+                     <div class="text-[9px] uppercase text-gray-400 mb-1">Partecipanti Totali (CPU Riempitive)</div>
+                     <select id="tourney-size" class="w-full bg-gray-900 text-white text-xs p-1 rounded font-bold" onchange="if(isHost) updateDB('settings.tourneySize', parseInt(this.value))">
+                        <option value="8">8 Giocatori</option>
+                        <option value="16">16 Giocatori</option>
+                        <option value="32">32 Giocatori</option>
+                     </select>
+                </div>
+                <div class="bg-gray-800 p-2 rounded">
+                    <div class="text-[9px] uppercase text-gray-400 mb-1">Tipo Finale</div>
+                    <div class="flex space-x-2">
+                        <button onclick="if(isHost) updateDB('settings.finalType', 2)" id="btn-final-2" class="mode-btn w-1/2">Duello (1v1)</button>
+                        <button onclick="if(isHost) updateDB('settings.finalType', 4)" id="btn-final-4" class="mode-btn w-1/2">Rissa (4)</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Navigation -->
+            <button onclick="if(isHost) goToRoster()" class="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 py-3 rounded-xl font-bold text-lg shadow-lg">
+                VAI AL ROSTER <i class="fas fa-arrow-right ml-2"></i>
+            </button>
+        </div>
+    </div>
+
+    <!-- 2. ROSTER SCREEN (Sync Selection) -->
+    <div id="screen-roster" class="hidden flex-grow flex flex-col p-4 fade-in h-full">
+        <h2 class="text-2xl font-bold text-center mb-4 text-white">SCEGLI PERSONAGGIO</h2>
+        <div class="glass-panel p-4 rounded-xl flex-grow flex flex-col overflow-hidden">
+             <!-- Players Status List -->
+             <div id="roster-status-list" class="flex overflow-x-auto space-x-2 mb-4 pb-2 border-b border-gray-700 min-h-[80px]"></div>
+             
+             <!-- Grid -->
+             <div class="grid grid-cols-4 md:grid-cols-6 gap-2 overflow-y-auto flex-grow p-1" id="roster-grid"></div>
+        </div>
+        <div class="mt-4 glass-panel p-3 rounded-xl flex justify-between items-center shrink-0">
+             <div class="text-xs text-gray-400"><i class="fas fa-info-circle"></i> <span id="roster-msg">Scegli e conferma</span></div>
+             <button id="btn-roster-ready" onclick="toggleReady()" class="bg-gray-600 px-6 py-3 rounded-xl font-bold transition-all">NON PRONTO</button>
+             <button id="btn-start-game" onclick="launchGame()" class="hidden bg-green-600 hover:bg-green-500 px-6 py-3 rounded-xl font-bold shadow-lg animate-pulse">START GAME</button>
+        </div>
+    </div>
+
+    <!-- 3. BRACKET SCREEN -->
+    <div id="screen-bracket" class="hidden flex-grow flex flex-col p-4 fade-in h-full relative bg-gray-900">
+        <div class="text-center mb-2 shrink-0">
+            <h2 class="text-2xl font-bold text-white">TORNEO</h2>
+            <div id="bracket-round-name" class="text-sm text-yellow-400 font-bold uppercase">ROUND 1</div>
+        </div>
+        <div class="flex-grow overflow-x-auto overflow-y-hidden flex items-center px-4" id="bracket-scroll-area">
+             <div id="bracket-container" class="flex gap-4 mx-auto"></div>
+        </div>
+        <div class="mt-4 glass-panel p-4 rounded-xl flex flex-col items-center justify-center shrink-0 w-full max-w-md mx-auto space-y-2">
+            <div id="bracket-msg" class="text-sm text-gray-300">In attesa...</div>
+            <button id="btn-play-match" onclick="enterMatch()" class="w-full bg-yellow-600 hover:bg-yellow-500 py-3 rounded-xl font-bold shadow-lg hidden">GIOCA IL TUO MATCH</button>
+            <button id="btn-advance-round" onclick="if(isHost) nextBracketRound()" class="w-full bg-green-600 hover:bg-green-500 py-3 rounded-xl font-bold shadow-lg hidden">PROSSIMO ROUND (HOST)</button>
+        </div>
+    </div>
+
+    <!-- 4. GAME SCREEN -->
+    <div id="screen-game" class="hidden flex-grow flex flex-col h-screen overflow-hidden bg-gray-900 fade-in">
+        <div class="leaderboard-bar w-full h-16 shrink-0 flex items-center space-x-2 px-4 overflow-x-auto scrollbar-hide z-30 shadow-2xl bg-gray-800 border-b border-gray-700" id="top-leaderboard"></div>
+        
+        <div class="flex-grow flex flex-col lg:flex-row overflow-hidden relative">
+            <div class="flex-grow p-2 flex flex-col items-center justify-center relative overflow-hidden bg-gray-900/50">
+                <div class="absolute top-2 right-2 z-20 bg-gray-800/80 px-3 py-1 rounded-full text-xs border border-gray-700">
+                    ROUND <span id="game-round" class="text-white font-bold ml-1">1</span>
+                </div>
+                <div id="game-grid" class="grid-container transition-all"></div>
+                <div id="instruction-banner" class="mt-4 bg-gray-800/90 px-6 py-2 rounded-full border border-gray-600 text-sm text-white shadow-xl min-h-[40px] flex items-center justify-center z-20">
+                    <span id="instruction-text">...</span>
+                </div>
+            </div>
+
+            <!-- Controls Panel -->
+            <div class="w-full lg:w-80 bg-gray-800 border-t lg:border-t-0 lg:border-l border-gray-700 flex flex-col shadow-2xl z-20 h-[35vh] lg:h-full p-4">
+                 <div class="flex items-center space-x-3 mb-4 p-3 bg-gray-700/50 rounded-xl border border-gray-600">
+                      <img id="ap-avatar" src="" class="w-12 h-12 rounded-full border-2 bg-gray-900 object-cover">
+                      <div class="overflow-hidden w-full">
+                           <div id="ap-name" class="font-bold truncate">...</div>
+                           <div class="flex justify-between items-center">
+                               <span id="ap-status" class="text-[10px] bg-blue-600 px-1 rounded">...</span>
+                               <span id="spectator-badge" class="hidden text-[10px] bg-gray-500 px-2 rounded uppercase font-bold"><i class="fas fa-eye"></i> SPETTATORE</span>
+                           </div>
+                      </div>
+                 </div>
+
+                 <!-- Dice & Actions -->
+                 <div class="flex space-x-4 h-32 relative">
+                      <!-- Action Blocker Overlay -->
+                      <div id="turn-blocker" class="absolute inset-0 z-50 bg-gray-900/80 backdrop-blur-[2px] rounded-xl flex items-center justify-center hidden">
+                          <span class="text-xs font-bold text-gray-400 uppercase tracking-widest">Turno Avversario</span>
+                      </div>
+
+                      <div class="w-1/2 bg-gray-900/50 rounded-xl border border-gray-700 flex items-center justify-center">
+                           <div class="dice-scene scale-75">
+                                <div class="cube" id="dice-cube">
+                                    <div class="cube__face cube__face--1"><div class="dot"></div></div>
+                                    <div class="cube__face cube__face--2"><div class="dot"></div><div class="dot"></div></div>
+                                    <div class="cube__face cube__face--3"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
+                                    <div class="cube__face cube__face--4"><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
+                                    <div class="cube__face cube__face--5"><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
+                                    <div class="cube__face cube__face--6"><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
+                                </div>
+                           </div>
+                      </div>
+                      <div class="w-1/2 relative">
+                           <!-- ROLL BUTTON -->
+                           <button id="btn-roll" onclick="performRoll()" class="hidden w-full h-full bg-gradient-to-br from-pink-600 to-rose-600 rounded-xl font-bold text-white shadow-lg flex flex-col items-center justify-center">
+                                <i class="fas fa-dice text-3xl mb-1"></i> <span>LANCIA</span>
+                           </button>
+                           <!-- ACTIONS PANEL -->
+                           <div id="panel-actions" class="hidden w-full h-full flex flex-col items-center justify-center bg-blue-900/30 rounded-xl border border-blue-500/50">
+                                <div id="action-pts" class="text-4xl font-bold text-blue-400">0</div>
+                                <span class="text-[9px] uppercase font-bold mb-1">AZIONI</span>
+                                <button onclick="endTurn()" class="bg-gray-700 px-3 py-1 rounded text-xs">SALTA</button>
+                           </div>
+                           <!-- ITEM BUTTON -->
+                           <button id="btn-use-item" onclick="activateItem()" class="hidden absolute -top-10 right-0 bg-purple-600 px-3 py-1 rounded text-xs font-bold shadow-lg">USA <i class="fas fa-bolt"></i></button>
+                      </div>
+                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- NOTIFICATION -->
+    <div id="notification" class="fixed top-10 left-1/2 transform -translate-x-1/2 z-[60] opacity-0 transition-opacity pointer-events-none">
+        <div class="bg-gray-800/90 backdrop-blur border border-gray-600 px-6 py-3 rounded-full shadow-2xl flex items-center gap-3">
+             <i id="notif-icon" class="text-2xl text-yellow-400"></i>
+             <div>
+                 <h3 id="notif-title" class="font-bold text-sm text-white leading-none">Title</h3>
+                 <p id="notif-msg" class="text-xs text-gray-300">Message</p>
+             </div>
+        </div>
+    </div>
+
+    <!-- GAME OVER / ELIMINATED MODAL -->
+    <div id="modal-gameover" class="fixed inset-0 z-[70] bg-black/90 flex items-center justify-center hidden">
+        <div class="bg-gray-800 rounded-2xl p-6 max-w-sm w-full text-center border border-gray-700">
+            <i class="fas fa-skull text-6xl text-gray-500 mb-4" id="go-icon"></i>
+            <h2 class="text-2xl font-bold text-white mb-2" id="go-title">ELIMINATO</h2>
+            <p class="text-gray-400 text-sm mb-6" id="go-msg">Non hai più territori.</p>
+            <div class="flex gap-2">
+                <button onclick="location.reload()" class="flex-1 bg-red-900 hover:bg-red-800 py-3 rounded-xl font-bold border border-red-700">ESCI</button>
+                <button onclick="becomeSpectator()" class="flex-1 bg-blue-600 hover:bg-blue-500 py-3 rounded-xl font-bold shadow-lg">SPETTATORE</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- ASSETS & CONSTANTS ---
+        const PALETTE = ['#EF4444', '#F97316', '#F59E0B', '#84CC16', '#10B981', '#06B6D4', '#3B82F6', '#8B5CF6', '#EC4899', '#64748B', '#F43F5E', '#A855F7', '#EAB308', '#14B8A6', '#6366F1', '#D946EF'];
+        const ROSTER = [
+            {name: "Aang", img: "https://i.pinimg.com/736x/05/01/fc/0501fc8ed44f7bd4ad9e74d9bb959669.jpg"}, {name: "Ben 10", img: "https://i.pinimg.com/736x/ad/5c/cd/ad5ccdba073abda30c152f7eac48447b.jpg"}, {name: "Bowser", img: "https://i.pinimg.com/1200x/cf/3f/ec/cf3fec1f6b9334e0255065f150fa97a9.jpg"},
+            {name: "Bugs Bunny", img: "https://i.pinimg.com/1200x/ff/d1/66/ffd166e976132eb05bf59b5339a01931.jpg"}, {name: "Cell", img: "https://i.pinimg.com/736x/cd/e2/4c/cde24ca1463975e32a513dcd96d20cae.jpg"}, {name: "Doraemon", img: "https://i.pinimg.com/736x/b1/75/de/b175de80fb0f5ca9b5230f0b12f3c13c.jpg"},
+            {name: "Elsa", img: "https://i.pinimg.com/736x/0a/e9/e8/0ae9e8606e505a0315e105b73a96e387.jpg"}, {name: "Goku", img: "https://i.pinimg.com/736x/cb/96/5a/cb965ab6c13eaf52f182474b6fc9a7d1.jpg"}, {name: "Homer", img: "https://i.pinimg.com/1200x/1d/b9/18/1db918fe2b5dff69f35186ad20cc1752.jpg"},
+            {name: "Jerry", img: "https://i.pinimg.com/736x/be/2f/e1/be2fe1bde39e5005bdc4cea479dcf6f7.jpg"}, {name: "Kirby", img: "https://i.pinimg.com/736x/ba/e6/63/bae6637b3efecfd002f0c1f9605e53be.jpg"}, {name: "Kratos", img: "https://i.pinimg.com/736x/d9/d4/4f/d9d44f16329a4e72b4b8e45d41d83262.jpg"},
+            {name: "Link", img: "https://i.pinimg.com/736x/be/29/0a/be290ac4f5b6f1de6f88ee2099e04da1.jpg"}, {name: "Luigi", img: "https://i.pinimg.com/1200x/0b/49/30/0b49308522463829166e76b0d914c8b8.jpg"}, {name: "Mario", img: "https://i.pinimg.com/736x/61/62/b5/6162b56bc61a4050bb34d7203e03642d.jpg"},
+            {name: "Morty", img: "https://i.pinimg.com/736x/95/5c/dc/955cdc707097b8546e167c2188c4b5df.jpg"}, {name: "Pikachu", img: "https://i.pinimg.com/736x/ad/65/b6/ad65b669746561313925ffff392518bc.jpg"}, {name: "Rick", img: "https://i.pinimg.com/736x/95/5c/dc/955cdc707097b8546e167c2188c4b5df.jpg"},
+            {name: "Shrek", img: "https://i.pinimg.com/1200x/cf/d2/85/cfd285a97021713f6f5cada516043233.jpg"}, {name: "Sonic", img: "https://i.pinimg.com/736x/ae/01/6c/ae016c6828620c2b981bbf92fd1219d4.jpg"}, {name: "Spongebob", img: "https://i.pinimg.com/1200x/27/e0/2e/27e02eadbe6a321a7d0a9641a394c811.jpg"},
+            {name: "Spiderman", img: "https://i.pinimg.com/736x/c3/ed/77/c3ed7755f4cbee4cd34316139d132597.jpg"}, {name: "Batman", img: "https://i.pinimg.com/736x/1a/1b/2c/1a1b2c3d.jpg"}, {name: "Yoda", img: "https://i.pinimg.com/736x/4d/5e/6f/4d5e6f.jpg"}
+        ];
+        const ITEMS = { BONUS: {icon:'fa-star', color:'text-yellow-300', instant:true}, BOMB: {icon:'fa-bomb', color:'text-red-500', instant:false}, OPPORTUNITY: {icon:'fa-hourglass-start', color:'text-purple-400', instant:true} };
+
+        // --- GLOBAL STATE (SYNCED FROM DB) ---
+        let myUid = null;
+        let myNick = "";
+        let lobbyCode = null;
+        let isHost = false;
+        let isSpectating = false;
+        let dbState = null; // The Single Source of Truth
+        let lobbyUnsub = null;
+
+        // --- AUTH ---
+        window.addEventListener('load', () => {
+             // Listener per Auth state
+             window.fb.onAuthStateChanged(window.fb.auth, (user) => {
+                 if(user) {
+                     myUid = user.uid;
+                     console.log("Logged as", myUid);
+                     document.getElementById('loading-screen').classList.add('hidden');
+                     document.getElementById('screen-login').classList.remove('hidden');
+                 } else {
+                     // Auto login anonimo
+                     window.fb.signInAnonymously(window.fb.auth).catch(e => alert("Auth Error: " + e.message));
+                 }
+             });
+        });
+
+        // --- LOBBY LOGIC ---
+        async function createLobby() {
+            const nick = document.getElementById('inp-nickname').value.toUpperCase().trim();
+            if(!nick) return alert("INSERISCI UN NICKNAME");
+            myNick = nick;
+            lobbyCode = Math.random().toString(36).substring(2, 6).toUpperCase();
+            
+            const initialData = {
+                code: lobbyCode,
+                hostId: myUid,
+                status: 'LOBBY', // LOBBY, SETUP, ROSTER, GAME, BRACKET
+                settings: { setupType: 'QUICK', mode: 'CLASSIC', mapType: 'SQUARE', tourneySize: 8, cpuCount: 0, finalType: 2 },
+                players: [{ uid: myUid, name: nick, charIdx: -1, isReady: false, color: PALETTE[0], isHost: true, isDead: false, isSpectating: false }],
+                gameState: { grid: [], turnIndex: 0, round: 1, actionsLeft: 0, phase: 'ROLL', diceValue: 1, animating: false },
+                tournament: { matches: [], roundIndex: 0 }
+            };
+
+            await window.fb.setDoc(getRef(), initialData);
+            enterLobby();
+        }
+
+        async function joinLobby() {
+            const nick = document.getElementById('inp-nickname').value.toUpperCase().trim();
+            const code = document.getElementById('inp-code').value.toUpperCase().trim();
+            if(!nick || !code) return alert("DATI MANCANTI");
+            myNick = nick;
+            lobbyCode = code;
+
+            const snap = await window.fb.getDoc(getRef());
+            if(!snap.exists()) return alert("STANZA NON TROVATA");
+            const data = snap.data();
+            
+            if(data.status !== 'LOBBY') return alert("PARTITA GIÀ INIZIATA");
+            if(data.players.length >= 16) return alert("STANZA PIENA");
+
+            const newPlayer = {
+                uid: myUid, name: nick, charIdx: -1, isReady: false, 
+                color: PALETTE[data.players.length % PALETTE.length], 
+                isHost: false, isDead: false, isSpectating: false 
+            };
+            
+            await window.fb.updateDoc(getRef(), { players: window.fb.arrayUnion(newPlayer) });
+            enterLobby();
+        }
+
+        function enterLobby() {
+            document.getElementById('screen-login').classList.add('hidden');
+            document.getElementById('lobby-code-display').innerText = lobbyCode;
+            
+            // Realtime Listener
+            lobbyUnsub = window.fb.onSnapshot(getRef(), (doc) => {
+                if(!doc.exists()) { location.reload(); return; }
+                const data = doc.data();
+                dbState = data;
+                isHost = (myUid === data.hostId);
+                syncUI();
+            });
+        }
+
+        // --- MAIN SYNC FUNCTION ---
+        function syncUI() {
+            const s = dbState.status;
+            
+            // Hide all first
+            ['screen-lobby', 'screen-setup', 'screen-roster', 'screen-game', 'screen-bracket'].forEach(id => document.getElementById(id).classList.add('hidden'));
+
+            if(s === 'LOBBY') {
+                document.getElementById('screen-lobby').classList.remove('hidden');
+                document.getElementById('lobby-count').innerText = `${dbState.players.length}/16`;
+                document.getElementById('lobby-list').innerHTML = dbState.players.map(p => `
+                    <div class="flex justify-between p-2 bg-gray-800 rounded border border-gray-700">
+                        <span class="${p.uid===myUid?'text-blue-400 font-bold':''}">${p.name}</span>
+                        ${p.isHost ? '<i class="fas fa-crown text-yellow-500"></i>' : ''}
+                    </div>
+                `).join('');
+                document.getElementById('host-controls').classList.toggle('hidden', !isHost);
+                document.getElementById('client-msg').classList.toggle('hidden', isHost);
+            }
+            else if(s === 'SETUP') {
+                document.getElementById('screen-setup').classList.remove('hidden');
+                document.getElementById('setup-blocker').classList.toggle('hidden', isHost);
+                
+                // Sync UI elements based on dbState.settings
+                const set = dbState.settings;
+                updateClass('tab-quick', set.setupType === 'QUICK');
+                updateClass('tab-tourney', set.setupType === 'TOURNAMENT');
+                
+                document.getElementById('settings-quick').classList.toggle('hidden', set.setupType !== 'QUICK');
+                document.getElementById('settings-tourney').classList.toggle('hidden', set.setupType !== 'TOURNAMENT');
+                
+                updateClass('btn-mode-classic', set.mode === 'CLASSIC');
+                updateClass('btn-mode-war', set.mode === 'TOTAL_WAR');
+                updateClass('btn-mode-tactics', set.mode === 'TACTICS');
+                
+                document.getElementById('map-select').value = set.mapType;
+                document.getElementById('val-cpuCount').innerText = set.cpuCount;
+                document.getElementById('tourney-size').value = set.tourneySize || 8;
+                
+                updateClass('btn-final-2', set.finalType === 2);
+                updateClass('btn-final-4', set.finalType === 4);
+            }
+            else if(s === 'ROSTER') {
+                document.getElementById('screen-roster').classList.remove('hidden');
+                renderRoster();
+            }
+            else if(s === 'GAME' || s === 'MATCH') {
+                document.getElementById('screen-game').classList.remove('hidden');
+                renderGame();
+                if(isHost) checkCpuTurn(); // Host manages CPU
+            }
+            else if(s === 'BRACKET') {
+                document.getElementById('screen-bracket').classList.remove('hidden');
+                renderBracket();
+            }
+        }
+
+        // --- HOST ACTIONS (DB WRITES) ---
+        async function updateDB(path, val) {
+            if(!isHost) return;
+            const obj = {}; obj[path] = val;
+            await window.fb.updateDoc(getRef(), obj);
+        }
+        async function updateCpuCount(d) {
+            let n = (dbState.settings.cpuCount || 0) + d;
+            if(n < 0) n = 0; if(n > 7) n = 7;
+            updateDB('settings.cpuCount', n);
+        }
+        async function goToSetup() { await window.fb.updateDoc(getRef(), { status: 'SETUP' }); }
+        async function goToRoster() { await window.fb.updateDoc(getRef(), { status: 'ROSTER' }); }
+
+        // --- ROSTER LOGIC ---
+        function renderRoster() {
+            const myP = dbState.players.find(p => p.uid === myUid);
+            const grid = document.getElementById('roster-grid');
+            grid.innerHTML = '';
+
+            // Status List (Top)
+            document.getElementById('roster-status-list').innerHTML = dbState.players.map(p => `
+                <div class="flex flex-col items-center min-w-[60px]">
+                    <div class="w-10 h-10 rounded-full border-2 ${p.isReady?'border-green-500':'border-red-500'} bg-gray-800 overflow-hidden">
+                        ${p.charIdx !== -1 ? `<img src="${ROSTER[p.charIdx].img}" class="w-full h-full object-cover">` : ''}
+                    </div>
+                    <span class="text-[9px] truncate w-full text-center mt-1 text-gray-400">${p.name}</span>
+                </div>
+            `).join('');
+
+            // Selection Grid
+            const taken = new Set(dbState.players.map(p => p.charIdx));
+            ROSTER.forEach((char, i) => {
+                const isMine = myP.charIdx === i;
+                const isTaken = taken.has(i) && !isMine;
+                
+                const d = document.createElement('div');
+                d.className = `aspect-square rounded-xl overflow-hidden border-2 cursor-pointer relative transition-all ${isMine ? 'border-green-500 ring-2 ring-green-500 scale-105' : (isTaken ? 'grayscale opacity-30 border-transparent cursor-not-allowed' : 'border-gray-700 hover:border-white')}`;
+                d.innerHTML = `<img src="${char.img}" class="w-full h-full object-cover">`;
+                
+                if(!isTaken && !myP.isReady) {
+                    d.onclick = async () => {
+                        const players = [...dbState.players];
+                        const idx = players.findIndex(p => p.uid === myUid);
+                        players[idx].charIdx = i;
+                        await window.fb.updateDoc(getRef(), { players });
+                    };
+                }
+                grid.appendChild(d);
+            });
+
+            // Buttons
+            const btnReady = document.getElementById('btn-roster-ready');
+            btnReady.innerText = myP.isReady ? "PRONTO!" : "CONFERMA";
+            btnReady.className = myP.isReady ? "bg-green-600 px-6 py-3 rounded-xl font-bold" : "bg-gray-600 hover:bg-gray-500 px-6 py-3 rounded-xl font-bold";
+            btnReady.disabled = myP.charIdx === -1;
+            
+            const allReady = dbState.players.every(p => p.isReady);
+            document.getElementById('btn-start-game').classList.toggle('hidden', !isHost || !allReady);
+            document.getElementById('roster-msg').innerText = allReady ? "Tutti pronti! In attesa dell'Host..." : "Scegli il tuo personaggio.";
+        }
+
+        async function toggleReady() {
+            const players = [...dbState.players];
+            const idx = players.findIndex(p => p.uid === myUid);
+            if(players[idx].charIdx === -1) return;
+            players[idx].isReady = !players[idx].isReady;
+            await window.fb.updateDoc(getRef(), { players });
+        }
+
+        async function launchGame() {
+            if(!isHost) return;
+            const s = dbState.settings;
+            
+            if(s.setupType === 'QUICK') {
+                // Prepare Game State
+                const allP = [...dbState.players];
+                const cpuC = s.cpuCount || 0;
+                
+                // Add CPUs
+                const taken = new Set(allP.map(p => p.charIdx));
+                for(let i=0; i<cpuC; i++) {
+                    let cIdx = -1;
+                    do { cIdx = Math.floor(Math.random()*ROSTER.length); } while(taken.has(cIdx));
+                    taken.add(cIdx);
+                    allP.push({
+                        uid: `cpu_${i}`, name: ROSTER[cIdx].name, charIdx: cIdx, 
+                        color: PALETTE[allP.length % PALETTE.length], 
+                        isHost: false, isReady: true, isDead: false, isSpectating: false
+                    });
+                }
+
+                // Generate Grid
+                const grid = generateGrid(s.mapType, 10);
+                assignSpawns(grid, allP.length);
+
+                await window.fb.updateDoc(getRef(), {
+                    status: 'GAME',
+                    gamePlayers: allP, // Separate list for game logic (includes CPU)
+                    'gameState.grid': grid,
+                    'gameState.turnIndex': 0,
+                    'gameState.phase': 'ROLL',
+                    'gameState.round': 1
+                });
+            } else {
+                initTournament();
+            }
+        }
+
+        // --- GAME LOGIC ---
+        function renderGame() {
+            const gs = dbState.gameState;
+            const players = dbState.gamePlayers;
+            const p = players[gs.turnIndex];
+            const isMyTurn = (p.uid === myUid);
+            const myP = players.find(x => x.uid === myUid);
+
+            // Check Spectator / Dead
+            if(myP && myP.isDead) {
+                if(!isSpectating) {
+                    document.getElementById('modal-gameover').classList.remove('hidden');
+                } else {
+                    document.getElementById('spectator-badge').classList.remove('hidden');
+                    document.getElementById('turn-blocker').classList.remove('hidden');
+                    document.getElementById('turn-blocker').querySelector('span').innerText = "MODALITÀ SPETTATORE";
+                }
+            } else {
+                document.getElementById('spectator-badge').classList.add('hidden');
+            }
+
+            // Top Info
+            document.getElementById('game-round').innerText = gs.round;
+            document.getElementById('ap-name').innerText = p.name;
+            const char = ROSTER[p.charIdx] || ROSTER[0];
+            document.getElementById('ap-avatar').src = char.img;
+            document.getElementById('ap-avatar').style.borderColor = p.color;
+            document.getElementById('ap-status').innerText = isMyTurn ? "TOCCA A TE!" : "IN ATTESA...";
+            document.getElementById('ap-status').className = isMyTurn ? "text-[10px] bg-green-600 px-1 rounded animate-pulse" : "text-[10px] bg-gray-600 px-1 rounded";
+
+            // Controls
+            const isBlocked = !isMyTurn || gs.animating;
+            document.getElementById('turn-blocker').classList.toggle('hidden', !isBlocked || (myP && myP.isDead));
+            document.getElementById('btn-roll').classList.toggle('hidden', gs.phase !== 'ROLL');
+            document.getElementById('panel-actions').classList.toggle('hidden', gs.phase === 'ROLL');
+            document.getElementById('action-pts').innerText = gs.actionsLeft;
+            document.getElementById('btn-use-item').classList.toggle('hidden', !p.heldItem);
+
+            // Dice Animation State
+            const dice = document.getElementById('dice-cube');
+            if(gs.animating) {
+                dice.className = 'cube rolling';
+            } else {
+                const r = getRotation(gs.diceValue);
+                dice.className = 'cube';
+                dice.style.transform = `translateZ(-30px) rotateX(${r.x}deg) rotateY(${r.y}deg)`;
+            }
+
+            // Grid Render
+            const cont = document.getElementById('game-grid');
+            cont.style.setProperty('--grid-cols', 10);
+            cont.innerHTML = '';
+            gs.grid.forEach((row, y) => {
+                row.forEach((cell, x) => {
+                    const d = document.createElement('div');
+                    if(cell.type === 'void') {
+                        d.className = 'cell void';
+                    } else {
+                        d.className = 'cell border-gray-700/50';
+                        if(cell.owner !== -1) {
+                            const owner = players[cell.owner];
+                            d.style.backgroundColor = owner.color;
+                            d.style.backgroundImage = `linear-gradient(0deg, ${owner.color}D9, ${owner.color}D9), url('${ROSTER[owner.charIdx].img}')`;
+                            d.classList.add('owned');
+                        }
+                        if(cell.item) {
+                            const it = ITEMS[cell.item];
+                            d.innerHTML = `<i class="fas ${it.icon} ${it.color} drop-shadow-md"></i>`;
+                        }
+
+                        // Interaction (Only if my turn)
+                        if(isMyTurn && !gs.animating && gs.phase === 'EXPAND') {
+                            if(isValidMove(gs.grid, x, y, gs.turnIndex)) {
+                                d.classList.add(cell.owner !== -1 ? 'highlight-attack' : 'highlight-valid');
+                                d.onclick = () => handleMove(x, y);
+                            }
+                        }
+                    }
+                    cont.appendChild(d);
+                });
+            });
+
+            renderLeaderboard(players);
+        }
+
+        // --- GAME ACTIONS (DB WRITES) ---
+        async function performRoll() {
+            // Optimistic update local (animation triggers via DB listener)
+            await window.fb.updateDoc(getRef(), { 'gameState.animating': true });
+            
+            // Wait for dramatic effect, then calc
+            setTimeout(async () => {
+                const val = Math.floor(Math.random()*6)+1;
+                await window.fb.updateDoc(getRef(), {
+                    'gameState.diceValue': val,
+                    'gameState.actionsLeft': val,
+                    'gameState.phase': 'EXPAND',
+                    'gameState.animating': false
+                });
+            }, 800);
+        }
+
+        async function handleMove(x, y) {
+            const gs = dbState.gameState;
+            if(gs.actionsLeft <= 0) return;
+            
+            // Clone grid to modify
+            const newGrid = JSON.parse(JSON.stringify(gs.grid));
+            const cell = newGrid[y][x];
+            const pIdx = gs.turnIndex;
+            const p = dbState.gamePlayers[pIdx];
+
+            // Item Logic
+            let extraAct = 0;
+            let newItem = null;
+            if(cell.item) {
+                if(ITEMS[cell.item].instant) {
+                    if(cell.item === 'BONUS') extraAct = 1;
+                    showNotif(ITEMS[cell.item].icon, 'BONUS!', 'Oggetto preso!');
+                } else {
+                    newItem = cell.item;
+                    showNotif(ITEMS[cell.item].icon, 'OGGETTO', 'Aggiunto all\'inventario');
+                }
+            }
+
+            // Update Cell
+            cell.owner = pIdx;
+            cell.item = null;
+            
+            const updates = {
+                'gameState.grid': newGrid,
+                'gameState.actionsLeft': gs.actionsLeft - 1 + extraAct
+            };
+            if(newItem) {
+                const newP = [...dbState.gamePlayers];
+                newP[pIdx].heldItem = newItem;
+                updates['gamePlayers'] = newP;
+            }
+
+            await window.fb.updateDoc(getRef(), updates);
+            
+            // Check elimination deferred to nextTurn logic or separate check
+            if(gs.actionsLeft - 1 + extraAct <= 0) setTimeout(endTurn, 500);
+        }
+
+        async function endTurn() {
+            const gs = dbState.gameState;
+            const players = dbState.gamePlayers;
+            let next = (gs.turnIndex + 1) % players.length;
+            let round = gs.round;
+            if(next === 0) round++;
+
+            // Skip dead players
+            let attempts = 0;
+            while(players[next].isDead && attempts < players.length) {
+                next = (next + 1) % players.length;
+                if(next === 0) round++;
+                attempts++;
+            }
+
+            // Check Win
+            const alive = players.filter(p => !p.isDead);
+            if(alive.length <= 1) {
+                // Game Over logic for Match/Game
+                showNotif('fa-trophy', 'VITTORIA', `${alive[0].name} VINCE!`);
+                return;
+            }
+
+            await window.fb.updateDoc(getRef(), {
+                'gameState.turnIndex': next,
+                'gameState.round': round,
+                'gameState.phase': 'ROLL',
+                'gameState.actionsLeft': 0
+            });
+        }
+
+        async function activateItem() {
+            // Placeholder for item logic (Bomb, etc.)
+            // For MVP, just consumes item
+            const players = [...dbState.gamePlayers];
+            players[dbState.gameState.turnIndex].heldItem = null;
+            await window.fb.updateDoc(getRef(), { gamePlayers: players });
+            showNotif('fa-check', 'USATO', 'Oggetto consumato');
+        }
+
+        function becomeSpectator() {
+            document.getElementById('modal-gameover').classList.add('hidden');
+            isSpectating = true;
+            renderGame();
+        }
+
+        // --- CPU LOGIC (HOST ONLY) ---
+        async function checkCpuTurn() {
+            const gs = dbState.gameState;
+            if(!gs || gs.phase === 'FINISHED') return;
+            const p = dbState.gamePlayers[gs.turnIndex];
+            
+            if(p.uid.startsWith('cpu_') && !gs.animating) {
+                if(gs.phase === 'ROLL') {
+                    await new Promise(r => setTimeout(r, 1000));
+                    await performRoll();
+                } 
+                else if(gs.phase === 'EXPAND') {
+                    if(gs.actionsLeft > 0) {
+                        await new Promise(r => setTimeout(r, 500));
+                        // Find Move
+                        const moves = [];
+                        gs.grid.forEach((r,y)=>r.forEach((c,x)=>{
+                            if(isValidMove(gs.grid, x, y, gs.turnIndex)) moves.push({x,y});
+                        }));
+                        if(moves.length > 0) {
+                            const m = moves[Math.floor(Math.random()*moves.length)];
+                            await handleMove(m.x, m.y);
+                        } else {
+                            await endTurn();
+                        }
+                    } else {
+                        await endTurn();
+                    }
+                }
+            }
+        }
+
+        // --- TOURNAMENT STUB (Simplified for brevity) ---
+        async function initTournament() {
+            // Host logic to create brackets...
+            // Similar to LaunchGame but creates MATCHES structure in DB
+            await window.fb.updateDoc(getRef(), { status: 'BRACKET', 'tournament.roundIndex': 0 });
+        }
+        function renderBracket() {
+            // Render logic reading dbState.tournament.matches
+            document.getElementById('bracket-msg').innerText = "Funzione Torneo Completa in arrivo...";
+        }
+
+        // --- UTILS & HELPERS ---
+        function getRef() { return window.fb.doc(window.fb.db, 'artifacts', window.appId, 'public', 'lobbies', lobbyCode); }
+        function updateClass(id, active) { 
+            const el = document.getElementById(id); 
+            if(active) el.className = el.className.replace('inactive', 'active').replace('text-gray-400', 'text-blue-400');
+            else el.className = el.className.replace('active', 'inactive').replace('text-blue-400', 'text-gray-400');
+        }
+        function getRotation(v){ const m={1:{x:0,y:0},2:{x:0,y:-180},3:{x:0,y:90},4:{x:0,y:-90},5:{x:-90,y:0},6:{x:90,y:0}}; return m[v]||m[1]; }
+        function showNotif(i,t,m){ 
+            const n=document.getElementById('notification'); 
+            document.getElementById('notif-icon').className=`fas ${i} text-2xl text-yellow-400`;
+            document.getElementById('notif-title').innerText=t; 
+            document.getElementById('notif-msg').innerText=m; 
+            n.classList.remove('opacity-0'); setTimeout(()=>n.classList.add('opacity-0'),2000); 
+        }
+
+        // Grid Logic
+        function generateGrid(type, size) {
+            let g=[];
+            for(let y=0; y<size; y++){
+                let r=[];
+                for(let x=0; x<size; x++){
+                    let v=false;
+                    if(type==='ARENA' && Math.sqrt((x-4.5)**2+(y-4.5)**2)>5) v=true;
+                    if(type==='DONUT' && Math.sqrt((x-4.5)**2+(y-4.5)**2)<2) v=true;
+                    let it=null;
+                    if(!v && Math.random()<0.1) it = Object.keys(ITEMS)[Math.floor(Math.random()*3)];
+                    r.push({owner:-1, type:v?'void':'normal', item:it});
+                }
+                g.push(r);
+            }
+            return g;
+        }
+        function assignSpawns(g, pc) {
+            const pos = [{x:0,y:0},{x:9,y:9},{x:0,y:9},{x:9,y:0},{x:4,y:0},{x:4,y:9},{x:0,y:4},{x:9,y:4}];
+            for(let i=0; i<pc; i++) {
+                if(pos[i]) g[pos[i].y][pos[i].x].owner = i;
+            }
+        }
+        function isValidMove(grid, x, y, pid) {
+            if(grid[y][x].owner === pid || grid[y][x].type === 'void') return false;
+            const d = [[0,1],[0,-1],[1,0],[-1,0]];
+            for(let k of d) {
+                const nx=x+k[0], ny=y+k[1];
+                if(nx>=0 && nx<10 && ny>=0 && ny<10 && grid[ny][nx].owner === pid) return true;
+            }
+            return false;
+        }
+        function renderLeaderboard(players) {
+            const board = document.getElementById('top-leaderboard');
+            const counts = players.map((p,i) => {
+                let c=0; dbState.gameState.grid.forEach(r=>r.forEach(x=>{ if(x.owner===i) c++; }));
+                return {i, c, dead: p.isDead};
+            });
+            board.innerHTML = counts.sort((a,b)=>b.c-a.c).map(d => {
+                const p = players[d.i];
+                const char = ROSTER[p.charIdx];
+                return `<div class="player-chip flex-shrink-0 flex flex-col items-center p-1 rounded w-12 border ${d.i===dbState.gameState.turnIndex?'active-turn border-blue-400': 'border-gray-700'} ${p.isDead?'opacity-50 grayscale':''}">
+                    <img src="${char.img}" class="w-6 h-6 rounded-full border" style="border-color:${p.color}">
+                    <span class="text-[8px] font-bold">${d.c}</span>
+                </div>`;
+            }).join('');
+        }
+    </script>
+</body>
+</html>
